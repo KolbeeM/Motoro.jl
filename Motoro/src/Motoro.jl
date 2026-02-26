@@ -1,26 +1,15 @@
 module Motoro
 
-function game() 
-    secret_number = rand(1:100)
-    tries = 0
-    guess = 0
+include("data.jl")
+include("options.jl")
+include("models.jl")
 
-    println("I'm thinking of a number between 1 and 100.")
-    println("Can you guess it?")
+export VanillaOption, EuropeanOption, AmericanOption
+export EuropeanCall, EuropeanPut
+export payoff
 
-    while guess != secret_number
-        print("Your guess: ")
-        guess = parse(Int64, readline())
-        tries += 1
+export Binomial, price
 
-        if guess < secret_number
-            println("Too low. Try again.")
-        elseif guess > secret_number
-            println("Too high. Try again.")
-        else 
-            println("Congratulations. You got it!")
-        end 
-    end
-end 
+export MarketData
 
 end # module Motoro
