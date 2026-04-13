@@ -1,8 +1,31 @@
 using Distributions
 using Statistics
+using Random
 
 norm_cdf(x) = cdf(Normal(0.0, 1.0), x)
 
+"""
+    Binomial(steps)
+
+Cox-Ross-Rubinstein (CRR) binomial tree pricing model.
+
+Works for both European and American options, including dividend-paying underlyings.
+Accuracy increases with `steps`; prices converge to the Black-Scholes-Merton value
+as `steps → ∞`.
+
+# Fields
+- `steps::Int`: Number of time steps in the tree
+
+# Examples
+```julia
+data = MarketData(41.0, 0.08, 0.30, 0.0)
+
+price(EuropeanCall(40.0, 1.0), Binomial(100), data)
+price(AmericanPut(40.0, 1.0),  Binomial(100), data)
+```
+
+See also: [`price`](@ref), [`BlackScholes`](@ref)
+"""
 struct Binomial
     steps::Int
 end
@@ -37,10 +60,10 @@ function price(option::EuropeanOption, model::Binomial, data::MarketData)
 end
 
 
-function price(option::AmericanOption, engine::Binomial, data::MarketData)
+function price(option::AmericanOption, model::Binomial, data::MarketData)
     (; strike, expiry) = option
     (; spot, rate, vol, div) = data
-    steps = engine.steps
+    steps = model.steps
 
     dt = expiry / steps
     u = exp((rate - div) * dt + vol * sqrt(dt))
@@ -49,46 +72,33 @@ function price(option::AmericanOption, engine::Binomial, data::MarketData)
     pd = 1 - pu
     disc = exp(-rate * dt)
 
-    # Asset prices at each node
-    s = zeros(steps + 1, steps + 1)
-    # Option values at each node
-    x = zeros(steps + 1, steps + 1)
-
-    # Initialize asset prices
-    for i in 0:steps
-        for j in 0:i
-            s[j + 1, i + 1] = spot * u^(i - j) * d^j
-        end
-    end
+    x = zeros(steps + 1)
 
     # Terminal payoffs
-    for j in 1:steps+1
-        x[j, steps + 1] = payoff(option, s[j, steps + 1])
+    @inbounds for i in 1:steps+1
+        x[i] = payoff(option, spot * u^(steps + 1 - i) * d^(i - 1))
     end
 
     # Backward induction with early exercise
-    for i in steps:-1:1
-        for j in 1:i
-            # Continuation value
-            continuation = disc * (pu * x[j, i + 1] + pd * x[j + 1, i + 1])
-            # Immediate exercise value
-            exercise = payoff(option, s[j, i])
-            # Take maximum for American option
-            x[j, i] = max(continuation, exercise)
+    for j in steps:-1:1
+        @inbounds for i in 1:j
+            continuation = disc * (pu * x[i] + pd * x[i + 1])
+            exercise = payoff(option, spot * u^(j - i) * d^(i - 1))
+            x[i] = max(continuation, exercise)
         end
     end
 
-    return x[1, 1]
+    return x[1]
 end
 
 """
     BlackScholes()
 
-Black-Scholes-Merton analytical pricing engine for European options.
+Black-Scholes-Merton analytical pricing model for European options.
 
-Provides exact closed-form solutions using the Black-Scholes formula. This is the
-fastest and most accurate method for European options under the Black-Scholes assumptions
-(constant volatility, log-normal price distribution, no dividends).
+Provides exact closed-form solutions using the Black-Scholes-Merton formula. This is the
+fastest and most accurate method for European options under the BSM assumptions
+(constant volatility, log-normal price distribution, continuous dividend yield).
 
 # Examples
 ```julia
@@ -96,16 +106,16 @@ data = MarketData(100.0, 0.05, 0.2, 0.0)
 call = EuropeanCall(100.0, 1.0)
 put = EuropeanPut(100.0, 1.0)
 
-engine = BlackScholes()
-call_price = price(call, engine, data)
-put_price = price(put, engine, data)
+model = BlackScholes()
+call_price = price(call, model, data)
+put_price = price(put, model, data)
 ```
 
 See also: [`price`](@ref), [`Binomial`](@ref)
 """
 struct BlackScholes end
 
-function price(option::EuropeanCall, engine::BlackScholes, data::MarketData)
+function price(option::EuropeanCall, model::BlackScholes, data::MarketData)
     (; strike, expiry) = option
     (; spot, rate, vol, div) = data
 
@@ -117,7 +127,7 @@ function price(option::EuropeanCall, engine::BlackScholes, data::MarketData)
     return price
 end
 
-function price(option::EuropeanPut, engine::BlackScholes, data::MarketData)
+function price(option::EuropeanPut, model::BlackScholes, data::MarketData)
     (; strike, expiry) = option
     (; spot, rate, vol, div) = data
 
@@ -132,174 +142,199 @@ end
 
 
 """
-    MonteCarlo(steps, reps)
+    VarianceReductionMethod
 
-Monte Carlo simulation engine for European option pricing.
+Abstract type for Monte Carlo variance reduction strategies.
 
-Generates random price paths and computes the discounted expected payoff.
-Useful for path-dependent options and provides visualization capabilities.
+See also: [`VarianceReduction`](@ref), [`DrawMethod`](@ref), [`PairingMethod`](@ref)
+"""
+abstract type VarianceReductionMethod end
+
+"""
+    DrawMethod
+
+Abstract type for random draw generation strategies.
+
+Concrete subtypes: [`PseudoRandom`](@ref), [`Stratified`](@ref)
+"""
+abstract type DrawMethod end
+
+"""
+    PseudoRandom <: DrawMethod
+
+Standard pseudo-random normal draws via `randn`. Baseline draw method.
+"""
+struct PseudoRandom <: DrawMethod end
+
+"""
+    Stratified <: DrawMethod
+
+Stratified sampling draws. Divides `[0,1]` into `n` equal strata and draws one
+sample per stratum, ensuring coverage of the full distribution and reducing
+variance compared to pure pseudo-random sampling.
+"""
+struct Stratified   <: DrawMethod end
+
+"""
+    PairingMethod
+
+Abstract type for antithetic pairing strategies.
+
+Concrete subtypes: [`NoPairing`](@ref), [`Antithetic`](@ref)
+"""
+abstract type PairingMethod end
+
+"""
+    NoPairing <: PairingMethod
+
+No antithetic pairing; draws are used as-is.
+"""
+struct NoPairing  <: PairingMethod end
+
+"""
+    Antithetic <: PairingMethod
+
+Antithetic variates pairing. For each draw `z`, also simulates a path using `-z`.
+The negative correlation between paired paths reduces estimator variance.
+"""
+struct Antithetic <: PairingMethod end
+
+"""
+    VarianceReduction{D<:DrawMethod, P<:PairingMethod}(draw, pairing)
+
+Combines a draw method and a pairing method into a variance reduction strategy
+for use with [`MonteCarlo`](@ref).
+
+# Fields
+- `draw::DrawMethod`: How to generate random draws ([`PseudoRandom`](@ref) or [`Stratified`](@ref))
+- `pairing::PairingMethod`: Pairing strategy ([`NoPairing`](@ref) or [`Antithetic`](@ref))
+
+# Examples
+```julia
+VarianceReduction(PseudoRandom(), NoPairing())   # baseline
+VarianceReduction(PseudoRandom(), Antithetic())  # antithetic variates
+VarianceReduction(Stratified(),   NoPairing())   # stratified sampling
+VarianceReduction(Stratified(),   Antithetic())  # both combined
+```
+"""
+struct VarianceReduction{D<:DrawMethod, P<:PairingMethod} <: VarianceReductionMethod
+    draw::D
+    pairing::P
+end
+
+"""
+    MonteCarlo(steps, reps[, method])
+
+Monte Carlo simulation model for European option pricing.
+
+Generates random asset price paths via geometric Brownian motion and returns
+the discounted expected payoff.
 
 # Fields
 - `steps::Int`: Number of time steps per simulation path
 - `reps::Int`: Number of simulation paths (replications)
+- `method::VarianceReductionMethod`: Variance reduction strategy (default: `PseudoRandom` with `NoPairing`)
 
 # Examples
 ```julia
-data = MarketData(100.0, 0.05, 0.2, 0.0)
-option = EuropeanCall(100.0, 1.0)
+data = MarketData(41.0, 0.08, 0.30, 0.0)
+call = EuropeanCall(40.0, 1.0)
 
-# Quick estimate with 1,000 paths
-engine = MonteCarlo(100, 1000)
-price(option, engine, data)
+# Default (pseudo-random, no pairing)
+price(call, MonteCarlo(100, 10_000), data)
 
-# Production quality with 100,000 paths
-engine = MonteCarlo(100, 100000)
-price(option, engine, data)
+# Antithetic variates
+price(call, MonteCarlo(100, 10_000, VarianceReduction(PseudoRandom(), Antithetic())), data)
 
-# Visualize sample paths
-paths = asset_paths(engine, 100.0, 0.05, 0.2, 1.0)
+# Stratified sampling
+price(call, MonteCarlo(100, 10_000, VarianceReduction(Stratified(), NoPairing())), data)
 ```
 
-See also: [`asset_paths`](@ref), [`asset_paths_col`](@ref), [`plot_paths`](@ref)
+See also: [`asset_paths`](@ref), [`VarianceReduction`](@ref)
 """
-
-abstract type VarianceReductionMethod end 
-
-struct Naive <: VarianceReductionMethod end 
-
-struct Antithetic <: VarianceReductionMethod end 
-
-struct Stratified <: VarianceReductionMethod end
-
-struct AntiStrat <: VarianceReductionMethod end
-
 struct MonteCarlo
     steps::Int
     reps::Int
     method::VarianceReductionMethod
 end
 
-MonteCarlo(steps::Int, reps::Int, ::Type{Naive}) = MonteCarlo(steps, reps, Naive())
-MonteCarlo(steps::Int, reps::Int, ::Type{Antithetic}) = MonteCarlo(steps, reps, Antithetic())
-MonteCarlo(steps::Int, reps::Int, ::Type{Stratified}) = MonteCarlo(steps, reps, Stratified())
-MonteCarlo(steps::Int, reps::Int, ::Type{AntiStrat}) = MonteCarlo(steps, reps, AntiStrat())
+MonteCarlo(steps::Int, reps::Int) = MonteCarlo(steps, reps, VarianceReduction(PseudoRandom(), NoPairing()))
 
+
+function generate_draws(::PseudoRandom, n::Int)
+    randn(n)
+end
+
+function generate_draws(::Stratified, n::Int)
+    u = rand(n)
+    d = Normal()
+    draws = [quantile(d, (i - 1 + u[i]) / n) for i in 1:n]
+    shuffle!(draws)
+    return draws
+end
+
+function apply_pairing(::NoPairing, draws)
+    draws
+end
+
+function apply_pairing(::Antithetic, draws)
+    [draws; -draws]
+end
 
 """
-    asset_paths(model::MonteCarlo, spot, rate, vol, expiry)
+    asset_paths(method::VarianceReduction, model::MonteCarlo, spot, rate, vol, expiry)
 
-Generate asset price paths using geometric Brownian motion.
-
-Returns a matrix of simulated asset prices with dimensions `(reps, steps+1)`.
+Generate simulated asset price paths using geometric Brownian motion.
 
 # Arguments
-- `engine::MonteCarlo`: Monte Carlo engine with steps and reps
-- `spot`: Initial spot price
-- `rate`: Risk-free interest rate
-- `vol`: Volatility
-- `expiry`: Time to expiration
+- `method::VarianceReduction`: Variance reduction strategy controlling draw generation and pairing
+- `model::MonteCarlo`: Monte Carlo model (provides `steps` and `reps`)
+- `spot`: Initial asset price
+- `rate`: Risk-free interest rate (annualized)
+- `vol`: Volatility (annualized)
+- `expiry`: Time to expiration in years
 
 # Returns
-Matrix of size `(reps, steps+1)` where each row is a simulated path.
+Matrix of size `(reps, steps+1)`. Each row is one simulated price path;
+column 1 is the initial spot price and column `steps+1` is the terminal price.
 
 # Examples
 ```julia
-engine = MonteCarlo(100, 1000)
-paths = asset_paths(engine, 100.0, 0.05, 0.2, 1.0)
+data   = MarketData(41.0, 0.08, 0.30, 0.0)
+model = MonteCarlo(100, 1_000)
+paths  = asset_paths(model.method, model, data.spot, data.rate, data.vol, 1.0)
 size(paths)  # (1000, 101)
 ```
 
-See also: [`asset_paths_col`](@ref), [`asset_paths_ax`](@ref)
+See also: [`MonteCarlo`](@ref), [`price`](@ref)
 """
-function asset_paths(method::Naive, model::MonteCarlo, spot, rate, vol, expiry)
-    (; steps, reps) = model 
-
-    dt = expiry / steps
-    nudt = (rate - 0.5 * vol^2) * dt
-    sidt = vol * sqrt(dt)
-    paths = zeros(reps, steps + 1)
-    paths[:, 1] .= spot
-
-    @inbounds for i in 1:reps
-        @inbounds for j in 2:steps + 1
-            #z = rand(Normal(0.0, 1.0))
-            z = randn()
-            paths[i, j] = paths[i, j - 1] * exp(nudt + sidt * z)
-        end
-    end
-
-    return paths
-end
-
-
-function asset_paths(method::Antithetic, model::MonteCarlo, spot, rate, vol, expiry)
+function asset_paths(method::VarianceReduction, model::MonteCarlo, spot, rate, vol, expiry)
     (; steps, reps) = model
 
     dt = expiry / steps
     nudt = (rate - 0.5 * vol^2) * dt
     sidt = vol * sqrt(dt)
-    half = reps ÷ 2
+    n = reps ÷ (method.pairing isa Antithetic ? 2 : 1)
+
     paths = zeros(reps, steps + 1)
     paths[:, 1] .= spot
 
-    @inbounds for i in 1:half
-        @inbounds for j in 2:steps+1
-            z = randn()
-            paths[i, j]        = paths[i, j-1]        * exp(nudt + sidt * z)
-            paths[i + half, j] = paths[i + half, j-1] * exp(nudt + sidt * (-z))
-        end
-    end
-
-    return paths
-end
-
-function asset_paths(method::Stratified, model::MonteCarlo, spot, rate, vol, expiry)
-    (; steps, reps) = model
-
-    dt = expiry / steps
-    nudt = (rate - 0.5 * vol^2) * dt
-    sidt = vol * sqrt(dt)
-    paths = zeros(reps, steps + 1)
-    paths[:, 1] .= spot
-    d = Normal()
-    u = rand(reps)
-
-    @inbounds for i in 1:reps
-        z = quantile(d, (i - 1 + u[i]) / reps)
-        paths[i, end] = spot * exp(nudt + sidt * z)
-    end
-
-    return paths
-end
-
-function asset_paths(method::AntiStrat, model::MonteCarlo, spot, rate, vol, expiry)
-    (; steps, reps) = model
-
-    dt = expiry / steps
-    nudt = (rate - 0.5 * vol^2) * dt
-    sidt = vol * sqrt(dt)
-    half = reps ÷ 2
-    paths = zeros(reps, steps + 1)
-    paths[:, 1] .= spot
-    d = Normal()
-    u = rand(half)
-
-    @inbounds for i in 1:half
-        z = quantile(d, (i - 1 + u[i]) / half)
-        paths[i, end]        = spot * exp(nudt + sidt * z)
-        paths[i + half, end] = spot * exp(nudt + sidt * (-z))
+    @inbounds for j in 2:steps+1
+        z = generate_draws(method.draw, n)
+        z = apply_pairing(method.pairing, z)
+        paths[:, j] = paths[:, j-1] .* exp.(nudt .+ sidt .* z)
     end
 
     return paths
 end
 
 
-function price(option::EuropeanOption, engine::MonteCarlo, data::MarketData)
+function price(option::EuropeanOption, model::MonteCarlo, data::MarketData)
     (; strike, expiry) = option
     (; spot, rate, vol) = data
-    (; steps, reps) = engine
+    (; steps, reps) = model
 
-    paths = asset_paths(engine.method, engine, spot, rate, vol, expiry)
+    paths = asset_paths(model.method, model, spot, rate, vol, expiry)
     payoffs = payoff.(option, paths[:, end])
 
     return exp(-rate * expiry) * mean(payoffs)

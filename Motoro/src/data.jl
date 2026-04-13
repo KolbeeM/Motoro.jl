@@ -4,10 +4,10 @@
 Market parameters for option pricing.
 
 # Fields
-- `spot::Float64`: Current spot price of the underlying asset
-- `rate::Float64`: Risk-free interest rate (annualized, as decimal, e.g., 0.05 for 5%)
-- `vol::Float64`: Volatility (annualized standard deviation, as decimal, e.g., 0.2 for 20%)
-- `div::Float64`: Dividend yield (continuous, annualized, as decimal)
+- `spot::T`: Current spot price of the underlying asset
+- `rate::T`: Risk-free interest rate (annualized, as decimal, e.g., 0.05 for 5%)
+- `vol::T`: Volatility (annualized standard deviation, as decimal, e.g., 0.2 for 20%)
+- `div::T`: Continuous dividend yield (annualized, as decimal; use 0.0 for non-dividend paying assets)
 
 # Examples
 ```julia
@@ -18,9 +18,9 @@ data = MarketData(100.0, 0.05, 0.2, 0.0)
 data = MarketData(100.0, 0.05, 0.2, 0.02)
 ```
 """
-struct MarketData
-    spot::AbstractFloat
-    rate::AbstractFloat
-    vol::AbstractFloat
-    div::AbstractFloat
+struct MarketData{T<:AbstractFloat}
+    spot::T
+    rate::T
+    vol::T
+    div::T
 end

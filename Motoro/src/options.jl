@@ -104,7 +104,7 @@ Calculate the intrinsic value (payoff) of an option at a given spot price.
 
 # Arguments
 - `option::VanillaOption`: The option contract
-- `spot`: Spot price(s) of the underlying asset (can be scalar or vector)
+- `spot`: Spot price of the underlying asset (scalar)
 
 # Returns
 The intrinsic value of the option. For calls: `max(0, S - K)`, for puts: `max(0, K - S)`.
@@ -117,10 +117,13 @@ payoff(call, 110.0)  # Returns 10.0
 put = EuropeanPut(100.0, 1.0)
 payoff(put, 90.0)    # Returns 10.0
 payoff(put, 110.0)   # Returns 0.0
+
+# For a vector of spot prices, use broadcast syntax:
+payoff.(put, [85.0, 90.0, 95.0, 100.0, 105.0])
 ```
 """
 function payoff(option::EuropeanPut, spot)
-    return max.(0.0, option.strike - spot)
+    return max(0.0, option.strike - spot)
 end
 
 
