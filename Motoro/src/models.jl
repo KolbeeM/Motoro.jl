@@ -1,4 +1,5 @@
 using Distributions
+using LinearAlgebra
 using Statistics
 using Random
 
