@@ -510,7 +510,8 @@ price(CashOrNothingCall(100.0, 1.0, 1.0), model, data)
 
 See also: [`ExoticOption`](@ref), [`price`](@ref), [`SimulationResult`](@ref)
 """
-struct CashOrNothingCall{T<:AbstractFloat} <: ExoticOption
+abstract BinaryOption <: ExoticOption end
+struct CashOrNothingCall{T<:AbstractFloat} <: BinaryOption
     strike::T
     expiry::T
 end
@@ -519,7 +520,7 @@ function payoff(option::CashOrNothingCall, spot)
     return spot > option.K ? option.Threshold : 0.0
 end
 
-struct CashOrNothingPut{T<:AbstractFloat} <: ExoticOption
+struct CashOrNothingPut{T<:AbstractFloat} <: BinaryOption
     strike::T
     expiry::T
 end
