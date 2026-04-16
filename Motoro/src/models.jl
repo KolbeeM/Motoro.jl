@@ -661,8 +661,3 @@ end
 function payoff(option::CashOrNothingCall, S_T)
     return S_T > option.K ? option.Threshold : 0.0
 end
-
-function payoff(option::CashOrNothingCall, path)
-    S_T = path[end]
-    return S_T > option.K ? option.Threshold : 0.0
-end
