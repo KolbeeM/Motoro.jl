@@ -510,7 +510,7 @@ price(CashOrNothingCall(100.0, 1.0, 1.0), model, data)
 
 See also: [`ExoticOption`](@ref), [`price`](@ref), [`SimulationResult`](@ref)
 """
-abstract BinaryOption <: ExoticOption end
+abstract type BinaryOption <: ExoticOption end
 struct CashOrNothingCall{T<:AbstractFloat} <: BinaryOption
     strike::T
     expiry::T
