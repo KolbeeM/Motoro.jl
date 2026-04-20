@@ -20,9 +20,9 @@ export DrawMethod, PseudoRandom, Stratified
 export PairingMethod, NoPairing, Antithetic
 export generate_draws, apply_pairing
 export PricingResult, AnalyticResult, SimulationResult
-export Binomial, BlackScholes, asset_paths, price, delta
+export Binomial, BlackScholes, asset_paths, price, delta, CESP
 export MonteCarlo, RiskNeutralMonteCarlo, HedgedMonteCarlo
-export HedgeStrategy, StopLoss
+export HedgeStrategy, StopLoss, DeltaHedge
 
 export MarketData
 
