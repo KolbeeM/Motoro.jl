@@ -652,6 +652,6 @@ Hedge Strategy
 struct DeltaHedge <: HedgeStrategy
     mu::Float64   
 end
-function price(option::EuropeanOption, model::HedgedMonteCarlo{DeltaHedge}, data::MarketData)
+function price(option::VanillaOption, model::HedgedMonteCarlo{DeltaHedge}, data::MarketData)
 
-End
+end
