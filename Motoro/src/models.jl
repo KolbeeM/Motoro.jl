@@ -700,7 +700,7 @@ end
 Compute naive risk-neutral Monte Carlo and delta-hedged replication estimators
 from the exact same simulated paths. Useful for variance comparisons in Q7(e).
 """
-function compare_estimators_same_paths(option::EuropeanOption, paths::AbstractMatrix, data::MarketData)
+function CESP(option::EuropeanOption, paths::AbstractMatrix, data::MarketData)
     (; strike, expiry) = option
     (; rate, vol, div) = data
 
